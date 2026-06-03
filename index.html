@@ -69,13 +69,15 @@
                     <button type="button" class="link-registro" @click="abrirRegistro">Crear cuenta</button>
                 </div>
             </form>
-        </div> <div v-if="mostrarRegistro" class="modal-overlay" @click.self="cerrarRegistro">
+        </div> 
+        
+        <div v-if="mostrarRegistro" class="modal-overlay" @click.self="cerrarRegistro">
             <form class="modal-registro" @submit.prevent="registrarUsuario">
                 <h1 class="titulo-registro">ENCUESTADOS</h1>
                 <h2 class="subtitulo-registro">Crear Cuenta</h2>
 
                 <div class="ingresos-registro">
-                    <input type="text" v-model="nuevoUsuario.nombre" placeholder="Nombre completo" class="login-input" required>
+                    <input type="text" v-model="nuevoUsuario.nombre" autocomplete="name" placeholder="Nombre completo" class="login-input" required>
                 </div>
 
                 <div class="ingresos-registro">
@@ -97,7 +99,7 @@
                 </div>
 
                 <div class="ingresos-registro">
-                    <input type="password" v-model="nuevoUsuario.repetir_clave" placeholder="Repetir contraseña" class="login-input" required>
+                    <input type="password" v-model="nuevoUsuario.repetir_clave" autocomplete="new-password" placeholder="Repetir contraseña" class="login-input" required>
                 </div>
 
                 <div class="ingresos-registro">
@@ -121,7 +123,6 @@
         </div>
     </div>
 
-    <!-- 1. CDN de librerías externas -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
