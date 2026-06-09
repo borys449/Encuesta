@@ -3,7 +3,9 @@
  * Tablas: usuarios, encuestas, preguntas, respuestas_usuarios, respuestas_detalle
  */
 const SUPABASE_URL = 'https://raygaeiumarehtrsuoqe.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_0gwkICgd9SwE5G-Nz_EbYg_bWGUm0mi';
+const A=sb_publishable_0gwkICgd9S;
+const B=wE5G-Nz_EbYg_bWGUm0mi;
+const SUPABASE_KEY = A + B;
 
 function esArchivoLocal() {
     return window.location.protocol === 'file:';

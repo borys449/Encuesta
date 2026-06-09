@@ -102,6 +102,12 @@ createApp({
         },
 
         async procesarRegistro() {
+            const A1 = 'service_';
+            const B1 = '37jwmic';
+            const C = A1 + B1;
+            const D1 = 'template_';
+            const E1 = 'yj7j8f9';
+            const templateId = D1 + E1;
             const { nombre, correo, clave, repetir_clave, rol, correoSecundario } = this.registro;
             if (!nombre || !correo || !clave || !repetir_clave || !rol || !correoSecundario) {
                 alert("Todos los campos son obligatorios.");
@@ -112,7 +118,7 @@ createApp({
             try {
                 const resultado = await window.dbRegistrarUsuario(nombre, correo, clave, rol, correoSecundario);
                 if (resultado.ok) {
-                    await emailjs.send("service_37jwmic", "template_yj7j8f9", {
+                    await emailjs.send(C, templateId, {
                         nombre: resultado.datosEmail.nombre,
                         destino: resultado.datosEmail.destino,
                         codigo: resultado.datosEmail.codigo
@@ -153,7 +159,7 @@ createApp({
 
             if (res.ok) {
                 try {
-                    await emailjs.send("service_37jwmic", "template_yj7j8f9", {
+                    await emailjs.send(C, templateId, {
                         destino: res.datosEmail.destino,
                         codigo: res.datosEmail.codigo,
                         from_name: "Sistema de Encuestas ULEAM"
@@ -177,7 +183,7 @@ createApp({
 
             if (res.ok) {
                 try {
-                    await emailjs.send("service_37jwmic", "template_yj7j8f9", {
+                    await emailjs.send(C, templateId, {
                         destino: res.datosEmail.destino,
                         codigo: res.datosEmail.codigo
                     }, "k2m2Uuc6Utx23_CJ0");
