@@ -1,22 +1,12 @@
+/**
+ * ingreso.js - Lógica de interfaz y control de usuario
+ */
 const { createApp } = Vue;
 
 createApp({
     data() {
         return {
-            correo: '',
-            clave: '',
-            verClave: false,
-            error: false,
-            mensajeError: '',
-            recordar: false,
-            mostrarRegistro: false,
-            nuevoUsuario: {
-                nombre: '',
-                correo: '',
-                clave: '',
-                repetir_clave: '',
-                rol: ''
-            },
+            vistaActual: 'login',
             fraseActual: '',
             listaFrases: [
                 'No hay texto.',
@@ -30,12 +20,34 @@ createApp({
                 'Software es clave.',
                 'El conocimiento es libertad.'
             ],
-            ingresando: false
+            error: false,
+            mensajeError: '',
+            verClave: false,
+            remember: false,
+            cargando: false,
+
+            login: { correo: '', clave: '' },
+            registro: { 
+                nombre: '', 
+                correo: '', 
+                clave: '', 
+                repetir_clave: '', 
+                rol: '', 
+                correoSecundario: '' 
+            },
+            verificar: { correo: '', codigo: '' },
+            recuperar: { 
+                correoPrincipal: '', 
+                codigoVerificacion: '', 
+                nuevaClave: '', 
+                paso: 1 
+            }
         };
     },
 
     mounted() {
         this.generarFraseAleatoria();
+        setInterval(() => this.generarFraseAleatoria(), 8000);
 
         const avisoEntorno = window.dbMensajeEntorno ? window.dbMensajeEntorno() : null;
         if (avisoEntorno) {
@@ -43,121 +55,154 @@ createApp({
             this.error = true;
         }
 
+        // Inicialización EmailJS con la nueva Public Key
+        emailjs.init({
+            publicKey: "k2m2Uuc6Utx23_CJ0"
+        });
+
         if (window.dbObtenerSesion && window.dbObtenerSesion()) {
             window.location.replace('HTML/Proyecto_Pagina_Principal.html');
         }
 
         window.history.pushState(null, null, window.location.href);
-        window.onpopstate = function () {
-            window.history.go(1);
-        };
+        window.onpopstate = () => window.history.go(1);
     },
 
     methods: {
-        abrirRegistro() {
-            this.mostrarRegistro = true;
-            document.body.classList.add('modal-registro-abierto');
-        },
-
-        cerrarRegistro() {
-            this.mostrarRegistro = false;
-            document.body.classList.remove('modal-registro-abierto');
-        },
-
         generarFraseAleatoria() {
             const indice = Math.floor(Math.random() * this.listaFrases.length);
             this.fraseActual = this.listaFrases[indice];
         },
 
-        async validarIngreso() {
+        async procesarLogin() {
             this.error = false;
-            if (this.ingresando) return;
-
-            const avisoEntorno = window.dbMensajeEntorno ? window.dbMensajeEntorno() : null;
-            if (avisoEntorno) {
-                this.mensajeError = avisoEntorno;
+            if (!this.login.correo || !this.login.clave) {
+                this.mensajeError = 'Por favor, rellene todos los campos.';
                 this.error = true;
                 return;
             }
+            if (this.cargando) return;
 
-            this.ingresando = true;
-
+            this.cargando = true;
             try {
-                if (typeof window['dbLoginUsuario'] !== 'function') {
-                    this.mensajeError = 'Error: No se encuentra el archivo de persistencia de datos.';
-                    this.error = true;
-                    return;
-                }
-
-                const resultado = await window['dbLoginUsuario'](this.correo, this.clave);
-
-                if (resultado.ok && resultado.usuario) {
+                const resultado = await window.dbLoginUsuario(this.login.correo, this.login.clave);
+                if (resultado.ok) {
                     window.dbGuardarSesion(resultado.usuario);
                     window.location.replace('HTML/Proyecto_Pagina_Principal.html');
-                } else if (resultado.mensaje) {
-                    this.mensajeError = resultado.mensaje;
-                    this.error = true;
                 } else {
-                    this.mensajeError = 'Correo o contraseña incorrectos.';
+                    this.mensajeError = resultado.mensaje;
                     this.error = true;
                 }
             } catch (e) {
-                console.error(e);
-                this.mensajeError = 'Error de conexión. Abre el proyecto con Live Server.';
+                this.mensajeError = 'Error de conexión con la base de datos.';
                 this.error = true;
             } finally {
-                this.ingresando = false;
+                this.cargando = false;
             }
         },
 
-        async registrarUsuario() {
-            const { nombre, correo, clave, repetir_clave, rol } = this.nuevoUsuario;
-
-            if (!nombre || !correo || !clave || !repetir_clave || !rol) {
+        async procesarRegistro() {
+            const { nombre, correo, clave, repetir_clave, rol, correoSecundario } = this.registro;
+            if (!nombre || !correo || !clave || !repetir_clave || !rol || !correoSecundario) {
                 alert("Todos los campos son obligatorios.");
                 return;
             }
 
-            const correoL = correo.toLowerCase().trim();
-
-            if (rol === 'Estudiante' && !correoL.endsWith("@live.uleam.edu.ec")) {
-                alert("Los estudiantes deben usar correo @live.uleam.edu.ec");
-                return;
-            }
-            if ((rol === 'Profesor' || rol === 'Administrador') && !correoL.endsWith("@uleam.edu.ec")) {
-                alert("Docentes y Administrativos deben usar correo @uleam.edu.ec");
-                return;
-            }
-
-            const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-            if (!passRegex.test(clave)) {
-                alert("Contraseña débil. Debe tener:\n- Al menos 8 caracteres\n- Una letra Mayúscula\n- Una letra Minúscula\n- Al menos un Número");
-                return;
-            }
-
-            if (clave !== repetir_clave) {
-                alert("Las contraseñas no coinciden.");
-                return;
-            }
-
+            this.cargando = true;
             try {
-                if (typeof window['dbRegistrarUsuario'] !== 'function') {
-                    alert("Error crítico: Las funciones de la base de datos no se inyectaron correctamente en la ventana.");
-                    return;
-                }
-
-                const resultado = await window['dbRegistrarUsuario'](nombre, correo, clave, rol);
-
+                const resultado = await window.dbRegistrarUsuario(nombre, correo, clave, rol, correoSecundario);
                 if (resultado.ok) {
-                    alert(rol + " " + nombre + " ¡Cuenta creada exitosamente en Supabase!");
-                    this.mostrarRegistro = false;
-                    this.nuevoUsuario = { nombre: '', correo: '', clave: '', repetir_clave: '', rol: '' };
+                    await emailjs.send("service_37jwmic", "template_yj7j8f9", {
+                        nombre: resultado.datosEmail.nombre,
+                        destino: resultado.datosEmail.destino,
+                        codigo: resultado.datosEmail.codigo
+                    }, "k2m2Uuc6Utx23_CJ0");
+                    alert('Código de activación enviado a tu correo.');
+                    this.verificar.correo = correo;
+                    this.vistaActual = 'verificar';
                 } else {
-                    alert(resultado.error || "No se pudo completar el registro. Comprueba políticas RLS.");
+                    alert(resultado.error);
                 }
             } catch (e) {
-                console.error("Error en la vista de registro:", e);
-                alert("Error inesperado en la interfaz de usuario.");
+                alert("Error al intentar registrar el usuario.");
+            } finally {
+                this.cargando = false;
+            }
+        },
+
+        async procesarVerificacion() {
+            if (!this.verificar.codigo) return;
+            this.cargando = true;
+            const res = await window.dbActivarCuentaUsuario(this.verificar.correo, this.verificar.codigo);
+            this.cargando = false;
+
+            if (res.ok) {
+                alert('¡Cuenta activada con éxito!');
+                this.login.correo = this.verificar.correo;
+                this.vistaActual = 'login';
+            } else {
+                alert(res.mensaje);
+            }
+        },
+
+        async solicitarCodigoRecuperacion() {
+            if (!this.recuperar.correoPrincipal) return;
+            this.cargando = true;
+            const res = await window.dbSolicitarRecuperacion(this.recuperar.correoPrincipal);
+            this.cargando = false;
+
+            if (res.ok) {
+                try {
+                    await emailjs.send("service_37jwmic", "template_yj7j8f9", {
+                        destino: res.datosEmail.destino,
+                        codigo: res.datosEmail.codigo,
+                        from_name: "Sistema de Encuestas ULEAM"
+                    }, "k2m2Uuc6Utx23_CJ0");
+                    alert('Código enviado a tu correo.');
+                    this.recuperar.paso = 2;
+                } catch (err) {
+                    alert('Error al enviar el correo.');
+                }
+            } else {
+                alert(res.mensaje);
+            }
+        },
+        async reenviarCodigo() {
+            const correo = prompt("Ingresa tu correo institucional para reenviar el código:");
+            if (!correo) return;
+
+            this.cargando = true;
+            const res = await window.dbReenviarCodigoActivacion(correo);
+            this.cargando = false;
+
+            if (res.ok) {
+                try {
+                    await emailjs.send("service_37jwmic", "template_yj7j8f9", {
+                        destino: res.datosEmail.destino,
+                        codigo: res.datosEmail.codigo
+                    }, "k2m2Uuc6Utx23_CJ0");
+                    alert("Código reenviado. Revisa tu correo.");
+                    this.verificar.correo = correo;
+                    this.vistaActual = 'verificar';
+                } catch (e) {
+                    alert("Error al enviar el email.");
+                }
+            } else {
+                alert(res.mensaje);
+            }
+        },
+        async procesarCambioClave() {
+            const { correoPrincipal, codigoVerificacion, nuevaClave } = this.recuperar;
+            this.cargando = true;
+            const res = await window.dbVerificarCodigoYCambiarClave(correoPrincipal, codigoVerificacion, nuevaClave);
+            this.cargando = false;
+
+            if (res.ok) {
+                alert('Contraseña actualizada correctamente.');
+                this.vistaActual = 'login';
+                this.recuperar = { correoPrincipal: '', codigoVerificacion: '', nuevaClave: '', paso: 1 };
+            } else {
+                alert(res.mensaje);
             }
         }
     }

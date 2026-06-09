@@ -9,12 +9,10 @@ function esArchivoLocal() {
     return window.location.protocol === 'file:';
 }
 
-// Variables globales internas de la capa de datos
 let supabaseClient = null;
 let errorInicializacionDb = null;
 
 try {
-    // Si la librería externa ya está cargada en la ventana, inicializamos el cliente
     if (typeof window.supabase !== 'undefined') {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     }
@@ -24,7 +22,6 @@ try {
 }
 
 function dbMensajeEntorno() {
-    // MODIFICADO: Ya no bloqueamos 'file://', solo avisamos en consola si falta la librería por red
     if (!supabaseClient && typeof window.supabase === 'undefined') {
         return 'No se pudo cargar la librería de Supabase (Revisa tu conexión a internet).';
     }
@@ -113,7 +110,7 @@ function mapEncuestaFromDb(row, preguntas = [], detalles = []) {
 
 function usuarioPuedeResponder(encuesta, usuario) {
     const acceso = encuesta.acceso || {};
-    const rol = (usuario.rol || '').toUpperCase();
+    const rol = (usuario.role || usuario.rol || '').toUpperCase();
 
     if (acceso.tipo === 'todos') return true;
     if (acceso.tipo === 'rol') {
@@ -166,19 +163,21 @@ async function dbLoginUsuario(correo, clave) {
     }
 
     try {
-        const correoNorm = correo.toLowerCase().trim();
+        const correoNorm = String(correo).toLowerCase().trim();
         const { data, error } = await supabaseClient
             .from('usuarios')
-            .select('id, nombre, correo, clave, rol, inicial')
+            .select('id, nombre, correo, clave, rol, inicial, cuenta_activa')
             .eq('correo', correoNorm)
-            .eq('clave', clave)
+            .eq('clave', String(clave))
+            .eq('cuenta_activa', true)
             .maybeSingle();
 
         if (error) {
             console.error('Error en login:', error);
             return { ok: false, mensaje: error.message || 'No se pudo consultar la base de datos.' };
         }
-        if (!data) return { ok: false, mensaje: null };
+        
+        if (!data) return { ok: false, mensaje: 'Credenciales incorrectas o cuenta pendiente de verificación.' };
 
         return {
             ok: true,
@@ -193,23 +192,17 @@ async function dbLoginUsuario(correo, clave) {
         };
     } catch (e) {
         console.error('Error en login:', e);
-        return { ok: false, mensaje: 'Error de conexión. Verifica los permisos de CORS o tu red.' };
+        return { ok: false, mensaje: 'Error de conexión.' };
     }
 }
 
-async function dbRegistrarUsuario(nombre, correo, clave, rol) {
+async function dbRegistrarUsuario(nombre, correo, clave, rol, correoSecundario) {
     if (!supabaseClient && typeof window.supabase !== 'undefined') {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     }
 
-    if (!supabaseClient) {
-        return { ok: false, error: 'La librería de Supabase no se cargó correctamente.' };
-    }
-
     try {
-        const correoNorm = correo.toLowerCase().trim();
-        const rolNorm = String(rol).toUpperCase();
-
+        const correoNorm = String(correo).toLowerCase().trim();
         const { data: existente } = await supabaseClient
             .from('usuarios')
             .select('id')
@@ -218,230 +211,255 @@ async function dbRegistrarUsuario(nombre, correo, clave, rol) {
 
         if (existente) return { ok: false, error: 'Este correo ya está registrado.' };
 
+        // CORRECCIÓN: Usando nombres unificados de columnas
+        const codigoToken = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiracion = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
         const { error } = await supabaseClient.from('usuarios').insert([{
             nombre: nombre.trim(),
             correo: correoNorm,
-            clave: clave,
-            rol: rolNorm,
-            inicial: nombre.trim().charAt(0).toUpperCase()
+            clave: String(clave),
+            rol: String(rol).toUpperCase(),
+            inicial: nombre.trim().charAt(0).toUpperCase(),
+            correo_secundario: String(correoSecundario).toLowerCase().trim(),
+            codigo_verificacion: codigoToken,
+            codigo_expiracion: expiracion,
+            cuenta_activa: false
         }]);
 
         if (error) throw error;
-        return { ok: true };
+
+        return { 
+            ok: true,
+            datosEmail: { nombre: nombre.trim(), destino: correoSecundario, codigo: codigoToken }
+        };
     } catch (e) {
         console.error('Error al registrar:', e);
-        return { ok: false, error: 'No se pudo crear la cuenta. Verifica RLS, CORS o tu conexión.' };
+        return { ok: false, error: 'No se pudo crear la cuenta.' };
     }
 }
 
+async function dbActivarCuentaUsuario(correoPrincipal, codigoIngresado) {
+    try {
+        const correoNorm = String(correoPrincipal).toLowerCase().trim();
+        const { data: usuario, error } = await supabaseClient
+            .from('usuarios')
+            .select('id, codigo_expiracion')
+            .eq('correo', correoNorm)
+            .eq('codigo_verificacion', String(codigoIngresado).trim())
+            .maybeSingle();
+
+        if (error || !usuario) return { ok: false, mensaje: 'Código incorrecto.' };
+        
+        if (new Date(usuario.codigo_expiracion) < new Date()) {
+            return { ok: false, mensaje: 'El código ha expirado.' };
+        }
+
+        const { error: updateError } = await supabaseClient
+            .from('usuarios')
+            .update({ cuenta_activa: true, codigo_verificacion: null, codigo_expiracion: null })
+            .eq('id', usuario.id);
+
+        if (updateError) throw updateError;
+        return { ok: true };
+    } catch (e) {
+        console.error(e);
+        return { ok: false, mensaje: 'Error al activar.' };
+    }
+}
+
+async function dbSolicitarRecuperacion(correoPrincipal) {
+    try {
+        const correoNorm = String(correoPrincipal).toLowerCase().trim();
+        const { data: usuario, error } = await supabaseClient
+            .from('usuarios')
+            .select('nombre, correo, correo_secundario')
+            .eq('correo', correoNorm)
+            .maybeSingle();
+
+        if (error || !usuario) return { ok: false, mensaje: 'Usuario no encontrado.' };
+
+        const codigoToken = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiracion = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+        const { error: updateError } = await supabaseClient
+            .from('usuarios')
+            .update({
+                codigo_verificacion: codigoToken,
+                codigo_expiracion: expiracion
+            })
+            .eq('correo', correoNorm);
+
+        if (updateError) throw updateError;
+
+        return {
+            ok: true,
+            datosEmail: { nombre: usuario.nombre, destino: usuario.correo_secundario, codigo: codigoToken }
+        };
+    } catch (e) {
+        return { ok: false, mensaje: 'Error al procesar recuperación.' };
+    }
+}
+
+async function dbVerificarCodigoYCambiarClave(correoPrincipal, codigoIngresado, nuevaClave) {
+    try {
+        const correoNorm = String(correoPrincipal).toLowerCase().trim();
+        const codigoNorm = String(codigoIngresado).trim();
+
+        const { data: usuario, error } = await supabaseClient
+            .from('usuarios')
+            .select('correo, codigo_expiracion')
+            .eq('correo', correoNorm)
+            .eq('codigo_verificacion', codigoNorm)
+            .maybeSingle();
+
+        if (error || !usuario) return { ok: false, mensaje: 'Código incorrecto.' };
+        if (new Date(usuario.codigo_expiracion) < new Date()) return { ok: false, mensaje: 'Código expirado.' };
+
+        const { error: finalError } = await supabaseClient
+            .from('usuarios')
+            .update({
+                clave: String(nuevaClave).trim(),
+                codigo_verificacion: null,
+                codigo_expiracion: null
+            })
+            .eq('correo', correoNorm);
+
+        if (finalError) throw finalError;
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, mensaje: 'Error al cambiar clave.' };
+    }
+}
+window.dbReenviarCodigoActivacion = async function(correo) {
+    try {
+        // 1. Buscar usuario por correo y estado 'inactivo'
+        const { data: usuario, error } = await supabase
+            .from('usuarios')
+            .select('*')
+            .eq('correo', correo)
+            .eq('estado', 'inactivo') // Asegúrate de que tu columna se llame 'estado'
+            .single();
+
+        if (error || !usuario) return { ok: false, mensaje: "Cuenta no encontrada o ya está activa." };
+
+        // 2. Generar nuevo código
+        const nuevoCodigo = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // 3. Actualizar en la base de datos
+        const { error: errorUpdate } = await supabase
+            .from('usuarios')
+            .update({ 
+                codigo_verificacion: nuevoCodigo,
+                codigo_expiracion: new Date(Date.now() + 15 * 60000) // 15 minutos más
+            })
+            .eq('correo', correo);
+
+        if (errorUpdate) return { ok: false, mensaje: "Error al actualizar el código." };
+
+        return { ok: true, datosEmail: { destino: correo, codigo: nuevoCodigo } };
+    } catch (e) {
+        return { ok: false, mensaje: "Error interno." };
+    }
+};
 async function dbObtenerEncuestas(usuarioActual) {
     try {
         const todas = await dbCargarDatosEncuestas();
         const rol = (usuarioActual?.rol || '').toUpperCase();
         const correoSesion = (usuarioActual?.correo || '').toLowerCase().trim();
-
         if (rol === 'ADMINISTRADOR') return todas;
-
-        return todas.filter(e => {
-            const correoCreador = (e.creadorCorreo || '').toLowerCase().trim();
-            return correoCreador === correoSesion;
-        });
+        return todas.filter(e => (e.creadorCorreo || '').toLowerCase().trim() === correoSesion);
     } catch (e) {
-        console.error('Error al traer encuestas:', e);
         return [];
     }
 }
 
 async function dbObtenerEncuestasParaResponder(usuarioActual) {
-    if (!supabaseClient && typeof window.supabase !== 'undefined') {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    }
-
     try {
         const todas = await dbCargarDatosEncuestas();
         const correo = (usuarioActual?.correo || '').toLowerCase().trim();
-
-        const { data: historial, error: errHist } = await supabaseClient
+        const { data: historial } = await supabaseClient
             .from('respuestas_usuarios')
             .select('encuesta_id')
             .eq('usuario_correo', correo);
-
-        if (errHist) throw errHist;
-
         const respondidasIds = new Set((historial || []).map(r => String(r.encuesta_id)));
-
-        return todas.filter(e => {
-            const esActiva = (e.estado || 'Activa') === 'Activa';
-            const noRespondida = !respondidasIds.has(String(e.id));
-            const noSoyElCreador = (e.creadorCorreo || '').toLowerCase().trim() !== correo;
-            const tienePermiso = usuarioPuedeResponder(e, usuarioActual);
-            return esActiva && noRespondida && noSoyElCreador && tienePermiso;
-        });
+        return todas.filter(e => (e.estado === 'Activa') && !respondidasIds.has(String(e.id)) && usuarioPuedeResponder(e, usuarioActual));
     } catch (e) {
-        console.error('Error al cargar encuestas para responder:', e);
         return [];
     }
 }
 
 async function dbUsuarioYaRespondio(usuarioCorreo, encuestaId) {
-    if (!supabaseClient && typeof window.supabase !== 'undefined') {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    }
-
-    const { data, error } = await supabaseClient
+    const { data } = await supabaseClient
         .from('respuestas_usuarios')
         .select('id')
-        .eq('usuario_correo', usuarioCorreo.toLowerCase().trim())
+        .eq('usuario_correo', String(usuarioCorreo).toLowerCase().trim())
         .eq('encuesta_id', String(encuestaId))
         .maybeSingle();
-
-    if (error) {
-        console.error(error);
-        return false;
-    }
     return !!data;
 }
 
 async function dbGuardarEncuesta(encuestaFinal, preguntas) {
-    if (!supabaseClient && typeof window.supabase !== 'undefined') {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    }
-
     try {
-        const { error: errorEncuesta } = await supabaseClient.from('encuestas').insert([{
+        const { error } = await supabaseClient.from('encuestas').insert([{
             id: String(encuestaFinal.id),
             titulo: encuestaFinal.titulo,
-            descripcion: encuestaFinal.descripcion || null,
             creador_nombre: encuestaFinal.creador,
             creador_correo: encuestaFinal.creadorCorreo,
-            color_tema: encuestaFinal.colorTema || '#1a4d2e',
-            estado: encuestaFinal.estado || 'Activa',
-            total_votos: encuestaFinal.totalVotos ?? 0,
             acceso_tipo: encuestaFinal.acceso.tipo,
-            roles_permitidos: encuestaFinal.acceso.rolesPermitidos || [],
-            usuarios_permitidos: encuestaFinal.acceso.usuariosPermitidos || []
+            roles_permitidos: encuestaFinal.acceso.rolesPermitidos,
+            usuarios_permitidos: encuestaFinal.acceso.usuariosPermitidos
         }]);
-
-        if (errorEncuesta) throw errorEncuesta;
-
-        const preguntasPayload = preguntas.map(p => ({
+        if (error) throw error;
+        const { error: errP } = await supabaseClient.from('preguntas').insert(preguntas.map(p => ({
             id: String(p.id),
             encuesta_id: String(encuestaFinal.id),
             texto_pregunta: p.texto,
             tipo_pregunta: p.tipo,
-            opciones: p.tipo === 'texto' ? null : p.opciones
-        }));
-
-        const { error: errorPreguntas } = await supabaseClient.from('preguntas').insert(preguntasPayload);
-        if (errorPreguntas) throw errorPreguntas;
-
+            opciones: p.opciones
+        })));
+        if (errP) throw errP;
         return true;
     } catch (e) {
-        console.error('Error en guardado de encuesta:', e);
         return false;
     }
 }
 
 async function dbEliminarEncuesta(id) {
-    if (!supabaseClient && typeof window.supabase !== 'undefined') {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    }
-
     try {
         const { error } = await supabaseClient.from('encuestas').delete().eq('id', String(id));
-        if (error) throw error;
-        return true;
-    } catch (e) {
-        console.error('Error al eliminar encuesta:', e);
+        return !error;
+    } catch {
         return false;
     }
 }
 
 async function dbEnviarVotos(usuarioCorreo, usuarioNombre, encuesta, respuestasMap) {
-    if (!supabaseClient && typeof window.supabase !== 'undefined') {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    }
-
     try {
-        const correo = usuarioCorreo.toLowerCase().trim();
+        const correo = String(usuarioCorreo).toLowerCase().trim();
         const encuestaId = String(encuesta.id);
+        if (await dbUsuarioYaRespondio(correo, encuestaId)) return { ok: false, mensaje: 'Ya respondiste.' };
 
-        if (await dbUsuarioYaRespondio(correo, encuestaId)) {
-            return { ok: false, mensaje: 'Ya registraste tu respuesta en esta encuesta.' };
-        }
-
-        const { error: errorHistorial } = await supabaseClient.from('respuestas_usuarios').insert([{
-            usuario_correo: correo,
-            encuesta_id: encuestaId
-        }]);
-
-        if (errorHistorial) throw errorHistorial;
+        await supabaseClient.from('respuestas_usuarios').insert([{ usuario_correo: correo, encuesta_id: encuestaId }]);
 
         for (const p of encuesta.preguntas) {
-            const rUsuario = respuestasMap[p.id];
-            const preguntaId = String(p.id);
-
-            if (p.tipo === 'texto') {
-                const textoRespuesta = (rUsuario || '').toString().trim();
-                if (textoRespuesta) {
-                    const { error } = await supabaseClient.from(TABLA_DETALLE).insert([{
-                        encuesta_id: encuestaId,
-                        pregunta_id: preguntaId,
-                        nombre_usuario: usuarioNombre,
-                        opcion_elegida: textoRespuesta
-                    }]);
-                    if (error) throw error;
-                }
-                continue;
-            }
-
-            if (!p.opciones?.length) continue;
-
-            p.opciones.forEach(opt => {
-                const fueElegida = Array.isArray(rUsuario)
-                    ? rUsuario.includes(opt.texto)
-                    : rUsuario === opt.texto;
-                if (fueElegida) opt.votos = (opt.votos || 0) + 1;
-            });
-
-            const { error: errOpciones } = await supabaseClient
-                .from('preguntas')
-                .update({ opciones: p.opciones })
-                .eq('id', preguntaId);
-
-            if (errOpciones) throw errOpciones;
-
-            const opcionTexto = Array.isArray(rUsuario)
-                ? rUsuario.join(', ')
-                : (rUsuario || '').toString();
-
-            if (opcionTexto) {
-                const { error } = await supabaseClient.from(TABLA_DETALLE).insert([{
+            const r = respuestasMap[p.id];
+            if (r) {
+                await supabaseClient.from(TABLA_DETALLE).insert([{
                     encuesta_id: encuestaId,
-                    pregunta_id: preguntaId,
+                    pregunta_id: String(p.id),
                     nombre_usuario: usuarioNombre,
-                    opcion_elegida: opcionTexto
+                    opcion_elegida: Array.isArray(r) ? r.join(', ') : r
                 }]);
-                if (error) throw error;
             }
         }
-
-        const nuevoTotal = (encuesta.totalVotos || 0) + 1;
-        const { error: errTotal } = await supabaseClient
-            .from('encuestas')
-            .update({ total_votos: nuevoTotal })
-            .eq('id', encuestaId);
-
-        if (errTotal) throw errTotal;
-
         return { ok: true };
     } catch (e) {
-        console.error('Error al procesar votación:', e);
-        return { ok: false, mensaje: 'No se pudo guardar la respuesta.' };
+        return { ok: false, mensaje: 'Error al enviar.' };
     }
 }
 
-// INYECCIÓN AL ENTORNO WINDOW GLOBAL
+// INYECCIÓN GLOBAL
 window.dbMensajeEntorno = dbMensajeEntorno;
 window.dbObtenerSesion = dbObtenerSesion;
 window.dbGuardarSesion = dbGuardarSesion;
@@ -452,3 +470,6 @@ window.dbObtenerEncuestas = dbObtenerEncuestas;
 window.dbObtenerEncuestasParaResponder = dbObtenerEncuestasParaResponder;
 window.dbEliminarEncuesta = dbEliminarEncuesta;
 window.dbEnviarVotos = dbEnviarVotos;
+window.dbActivarCuentaUsuario = dbActivarCuentaUsuario;
+window.dbSolicitarRecuperacion = dbSolicitarRecuperacion;
+window.dbVerificarCodigoYCambiarClave = dbVerificarCodigoYCambiarClave;

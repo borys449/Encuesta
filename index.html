@@ -6,9 +6,12 @@
     <title>Ingreso - Encuestados ULEAM</title>
     <link rel="stylesheet" href="CSS/Proyecto_Ingreso.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>    
+
 </head>
 <body>
     <div id="app">
+        
         <header class="top-bar">
             <img src="HTML/LOGO-ULEAM.png" alt="Logo ULEAM" class="logo-header">
             <div class="frase-random">
@@ -24,8 +27,8 @@
 
         <div class="background-overlay"></div>
 
-        <div class="contenedor-del-login">
-            <form class="login" @submit.prevent="validarIngreso">
+        <div v-if="vistaActual === 'login'" class="contenedor-del-login">
+            <form class="login" @submit.prevent="procesarLogin">
                 <h1>ENCUESTADOS</h1>
 
                 <transition name="bounce">
@@ -37,8 +40,7 @@
                 <div class="ingresos">
                     <i class="fas fa-envelope"></i>
                     <input type="email"
-                           v-model="correo"
-                           name="email"
+                           v-model="login.correo"
                            autocomplete="username"
                            placeholder="Correo institucional"
                            class="login-input"
@@ -48,8 +50,7 @@
                 <div class="ingresos">
                     <i class="fas fa-lock"></i>
                     <input :type="verClave ? 'text' : 'password'"
-                           v-model="clave"
-                           name="password"
+                           v-model="login.clave"
                            autocomplete="current-password"
                            placeholder="Contraseña"
                            class="login-input"
@@ -59,36 +60,39 @@
                     </button>
                 </div>
 
-                <button type="submit" class="login-button">Ingresar</button>
+                <button type="submit" class="login-button" :disabled="cargando">
+                    <span v-if="cargando">Cargando...</span>
+                    <span v-else>Ingresar</span>
+                </button>
 
                 <div class="botones-adicionales">
-                    <div class="opcion-recordar">
-                        <input type="checkbox" v-model="recordar" id="rec">
-                        <label for="rec">Recordar sesión</label>
-                    </div>
-                    <button type="button" class="link-registro" @click="abrirRegistro">Crear cuenta</button>
+                    <button type="button" class="link-registro" @click="vistaActual = 'recuperar'">¿Olvidaste tu contraseña?</button>
+                    <button type="button" class="link-registro" @click="vistaActual = 'registro'">Crear cuenta</button>
                 </div>
             </form>
-        </div> 
-        
-        <div v-if="mostrarRegistro" class="modal-overlay" @click.self="cerrarRegistro">
-            <form class="modal-registro" @submit.prevent="registrarUsuario">
+        </div>
+
+        <div v-if="vistaActual === 'registro'" class="modal-overlay" @click.self="vistaActual = 'login'">
+            <form class="modal-registro" @submit.prevent="procesarRegistro">
                 <h1 class="titulo-registro">ENCUESTADOS</h1>
                 <h2 class="subtitulo-registro">Crear Cuenta</h2>
 
                 <div class="ingresos-registro">
-                    <input type="text" v-model="nuevoUsuario.nombre" autocomplete="name" placeholder="Nombre completo" class="login-input" required>
+                    <input type="text" v-model="registro.nombre" placeholder="Nombre completo" class="login-input" required>
                 </div>
 
                 <div class="ingresos-registro">
-                    <input type="email" v-model="nuevoUsuario.correo" name="new-email" autocomplete="email" placeholder="Correo institucional" class="login-input" required>
+                    <input type="email" v-model="registro.correo" autocomplete="email" placeholder="Correo institucional" class="login-input" required>
+                </div>
+
+                <div class="ingresos-registro">
+                    <input type="email" v-model="registro.correoSecundario" placeholder="Correo secundario (Gmail / Outlook)" class="login-input" required>
                 </div>
 
                 <div class="ingresos">
                     <i class="fas fa-lock"></i>
                     <input :type="verClave ? 'text' : 'password'"
-                           v-model="nuevoUsuario.clave"
-                           name="new-password"
+                           v-model="registro.clave"
                            autocomplete="new-password"
                            placeholder="Contraseña"
                            class="login-input"
@@ -99,33 +103,125 @@
                 </div>
 
                 <div class="ingresos-registro">
-                    <input type="password" v-model="nuevoUsuario.repetir_clave" autocomplete="new-password" placeholder="Repetir contraseña" class="login-input" required>
+                    <input type="password" v-model="registro.repetir_clave" placeholder="Repetir contraseña" class="login-input" required>
                 </div>
 
                 <div class="ingresos-registro">
-                    <select v-model="nuevoUsuario.rol" class="ingreso-rol" required>
-                        <option value="" disabled>¿Quién eres?</option>
-                        <option value="Estudiante">Estudiante (@live.uleam.edu.ec)</option>
-                        <option value="Profesor">Profesor (@uleam.edu.ec)</option>
-                        <option value="Administrador">Personal Administrativo / Secretaría</option>
+                    <select v-model="registro.rol" class="ingreso-rol" required>
+                        <option value="" disabled selected>¿Quién eres?</option>
+                        <option value="ESTUDIANTE">Estudiante (@live.uleam.edu.ec)</option>
+                        <option value="PROFESOR">Profesor (@uleam.edu.ec)</option>
+                        <option value="ADMINISTRADOR">Personal Administrativo / Secretaría</option>
                     </select>
                 </div>
 
                 <div class="modal-buttons">
-                    <button type="submit" class="btn-registrar">Completar Registro</button>
-                    <button type="button" class="btn-cancelar" @click="cerrarRegistro">Cancelar</button>
+                    <button type="submit" class="btn-registrar" :disabled="cargando">
+                        <span v-if="cargando">Enviando código...</span>
+                        <span v-else>Completar Registro</span>
+                    </button>
+                    <button type="button" class="btn-cancelar" @click="vistaActual = 'login'">Cancelar</button>
                 </div>
             </form>
         </div>
 
-        <div v-if="error && mensajeError.includes('Live Server')" class="aviso-servidor">
-            ⚠️ {{ mensajeError }}
+        <div v-if="vistaActual === 'verificar'" class="contenedor-del-login">
+            <form class="login" @submit.prevent="procesarVerificacion">
+                <h1>ACTIVAR CUENTA</h1>
+                <p style="color: white; text-align: center; margin-bottom: 15px;">
+                    Ingresa el código que te enviamos al correo secundario para activar tu usuario institucional.
+                </p>
+
+                <div class="ingresos">
+                    <i class="fas fa-key"></i>
+                    <input type="text"
+                           v-model="verificar.codigo"
+                           placeholder="Código de verificación"
+                           class="login-input"
+                           required>
+                </div>
+
+                <button type="submit" class="login-button" :disabled="cargando">
+                    <span v-if="cargando">Verificando...</span>
+                    <span v-else>Activar Cuenta</span>
+                </button>
+                
+                <div class="botones-adicionales">
+                    <button type="button" class="link-registro" @click="vistaActual = 'login'">Regresar al Login</button>
+                </div>
+            </form>
         </div>
+
+        <div v-if="vistaActual === 'recuperar'" class="contenedor-del-login">
+            
+            <form v-if="recuperar.paso === 1" class="login" @submit.prevent="solicitarCodigoRecuperacion">
+                <h1>RECUPERACIÓN</h1>
+                <p style="color: white; text-align: center; margin-bottom: 15px;">
+                    Escribe tu correo institucional. Te enviaremos un código de seguridad al correo alterno que registraste.
+                </p>
+
+                <div class="ingresos">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email"
+                           v-model="recuperar.correoPrincipal"
+                           placeholder="Correo institucional"
+                           class="login-input"
+                           required>
+                </div>
+
+                <button type="submit" class="login-button" :disabled="cargando">
+                    <span v-if="cargando">Enviando código...</span>
+                    <span v-else>Enviar Código</span>
+                </button>
+
+                <div class="botones-adicionales">
+                    <button type="button" class="link-registro" @click="vistaActual = 'login'">Volver al Login</button>
+                </div>
+            </form>
+
+            <form v-if="recuperar.paso === 2" class="login" @submit.prevent="procesarCambioClave">
+                <h1>NUEVA CLAVE</h1>
+
+                <div class="ingresos">
+                    <i class="fas fa-key"></i>
+                    <input type="text"
+                           v-model="recuperar.codigoVerificacion"
+                           placeholder="Código de seguridad"
+                           class="login-input"
+                           required>
+                </div>
+
+                <div class="ingresos">
+                    <i class="fas fa-lock"></i>
+                    <input :type="verClave ? 'text' : 'password'"
+                           v-model="recuperar.nuevaClave"
+                           placeholder="Nueva contraseña"
+                           class="login-input"
+                           required>
+                    <button type="button" class="toggle-password" @click="verClave = !verClave">
+                        <i :class="verClave ? 'far fa-eye-slash' : 'far fa-eye'"></i>
+                    </button>
+                </div>
+
+                <button type="submit" class="login-button" :disabled="cargando">
+                    <span v-if="cargando">Guardando...</span>
+                    <span v-else>Actualizar Contraseña</span>
+                </button>
+            </form>
+        </div>
+        <footer class="footer-asistencia">
+    <p>
+            ¿Creaste tu cuenta pero no recibiste el código de activación? 
+            <a href="#" @click.prevent="reenviarCodigo()" class="link-asistencia">
+                Reenviar código de activación
+            </a>
+        </p>
+    </footer>
     </div>
+
 
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    
     <script src="src/js/core/db.js" defer></script>
     <script src="src/js/views/ingreso.js" defer></script>
 </body>
