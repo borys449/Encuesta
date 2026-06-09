@@ -214,7 +214,10 @@ async function dbRegistrarUsuario(nombre, correo, clave, rol, correoSecundario) 
         if (existente) return { ok: false, error: 'Este correo ya está registrado.' };
 
         // CORRECCIÓN: Usando nombres unificados de columnas
-        const codigoToken = Math.floor(100000 + Math.random() * 900000).toString();
+        // Genera un número seguro de 6 dígitos
+        const array = new Uint32Array(1);
+        window.crypto.getRandomValues(array);
+        const codigoToken = (100000 + (array[0] % 900000)).toString();
         const expiracion = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
         const { error } = await supabaseClient.from('usuarios').insert([{
@@ -281,7 +284,10 @@ async function dbSolicitarRecuperacion(correoPrincipal) {
 
         if (error || !usuario) return { ok: false, mensaje: 'Usuario no encontrado.' };
 
-        const codigoToken = Math.floor(100000 + Math.random() * 900000).toString();
+        // Genera un número seguro de 6 dígitos
+        const array = new Uint32Array(1);
+        window.crypto.getRandomValues(array);
+        const codigoToken = (100000 + (array[0] % 900000)).toString();
         const expiracion = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
         const { error: updateError } = await supabaseClient
@@ -346,8 +352,11 @@ window.dbReenviarCodigoActivacion = async function(correo) {
         if (error || !usuario) return { ok: false, mensaje: "Cuenta no encontrada o ya está activa." };
 
         // 2. Generar nuevo código
-        const nuevoCodigo = Math.floor(100000 + Math.random() * 900000).toString();
-        
+        // Genera un número seguro de 6 dígitos
+        const array = new Uint32Array(1);
+        window.crypto.getRandomValues(array);
+        const codigoToken = (100000 + (array[0] % 900000)).toString();
+                
         // 3. Actualizar en la base de datos
         const { error: errorUpdate } = await supabase
             .from('usuarios')
